@@ -12,7 +12,8 @@
     OCaml (the most mature), Haskell (mostly works), and Scheme (a bit
     out of date). *)
 
-Extraction Language Ocaml.
+Require Import Coq.extraction.Extraction.
+Extraction Language OCaml.
 
 (** Now we load up the Coq environment with some definitions, either
     directly or by importing them from other modules. *)
