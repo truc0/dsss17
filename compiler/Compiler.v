@@ -222,7 +222,25 @@ Fixpoint mach_interp (C: code) (fuel: nat)
       match code_at C pc, stk with
       | Some Ihalt, nil => Terminates st
       | Some (Iconst n), stk => mach_interp C fuel' (pc + 1) (n :: stk) st
-      (* FILL IN HERE *)
+      | Some (Ivar x), stk => mach_interp C fuel' (pc + 1) ((st x) :: stk) st
+      | Some (Isetvar x), v :: stk' => mach_interp C fuel' (pc + 1) stk' (t_update st x v)
+      | Some Iadd, v2 :: v1 :: stk' => mach_interp C fuel' (pc + 1) ((v1 + v2) :: stk') st
+      | Some Isub, v2 :: v1 :: stk' => mach_interp C fuel' (pc + 1) ((v1 - v2) :: stk') st
+      | Some Imul, v2 :: v1 :: stk' => mach_interp C fuel' (pc + 1) ((v1 * v2) :: stk') st
+      | Some (Ibranch_forward ofs), stk => mach_interp C fuel' (pc + 1 + ofs) stk st
+      | Some (Ibranch_backward ofs), stk => mach_interp C fuel' (pc + 1 - ofs) stk st
+      | Some (Ibeq ofs), v2 :: v1 :: stk' => 
+          if (beq_nat v1 v2) then (mach_interp C fuel' (pc + 1 + ofs) stk' st)
+          else (mach_interp C fuel' (pc + 1) stk' st)
+      | Some (Ibne ofs), v2 :: v1 :: stk' =>
+          if (beq_nat v1 v2) then (mach_interp C fuel' (pc + 1) stk' st)
+          else (mach_interp C fuel' (pc + 1 + ofs) stk' st)
+      | Some (Ible ofs), v2 :: v1 :: stk' =>
+          if (leb v1 v2) then (mach_interp C fuel' (pc + 1 + ofs) stk' st)
+          else (mach_interp C fuel' (pc + 1) stk' st)
+      | Some (Ibgt ofs), v2 :: v1 :: stk' =>
+          if (leb v1 v2) then (mach_interp C fuel' (pc + 1) stk' st)
+          else (mach_interp C fuel' (pc + 1 + ofs) stk' st)
       | _, _ => GoesWrong
       end
   end.
@@ -323,7 +341,11 @@ Fixpoint compile_com (c: com) : code :=
       compile_bexp b false (length code_ifso + 1)
       ++ code_ifso
       ++ Ibranch_forward (length code_ifnot)
-      :: code_ifnot
+         :: code_ifnot
+      (*
+      ++ (if beq_nat (length code_ifnot) 0 then nil
+          else Ibranch_forward (length code_ifnot) :: code_ifnot)
+      *)
   | WHILE b DO body END =>
       let code_body := compile_com body in
       let code_test := compile_bexp b false (length code_body + 1) in
@@ -357,6 +379,8 @@ Compute (compile_program (IFB BEq (AId vx) (ANum 1) THEN vx ::= ANum 0 ELSE SKIP
 (** The last example shows a slight inefficiency in the code generated for
   [IFB ... THEN ... ELSE SKIP FI].  How would you change [compile_com]
   to generate better code?  Hint: ponder the following function. *)
+
+(* compile_com is modified *)
 
 Definition smart_Ibranch_forward (ofs: nat) : code :=
   if beq_nat ofs 0 then nil else Ibranch_forward(ofs) :: nil.
@@ -473,8 +497,7 @@ Proof.
 - (* AMinus *)
   eapply star_trans.
   apply IHa1. eauto with codeseq. 
-  eapply star_trans.
-  apply IHa2. eauto with codeseq. 
+  eapply star_trans.  apply IHa2. eauto with codeseq. 
   apply star_one. normalize. apply trans_sub. eauto with codeseq. 
 
 - (* AMult *)
@@ -664,8 +687,15 @@ Lemma trans_smart_branch_forward:
   star (transition C) (pc, stk, st) (pc + length (smart_Ibranch_forward ofs) + ofs, stk, st).
 Proof.
   unfold smart_Ibranch_forward; intros.
-  (* FILL IN HERE *)
-Admitted.
+  destruct (beq_nat ofs 0) eqn:Eofs; simpl.
+  - (* eapply star_trans. *)
+    symmetry in Eofs. apply beq_nat_eq in Eofs. subst ofs.
+    repeat rewrite plus_0_r.
+    constructor.
+  - apply star_one.
+    apply codeseq_at_head in H.
+    eapply trans_branch_forward; eauto.
+Qed.
 
 (** *** Exercise (3 stars, optional) *)
 (** The manufacturer of our virtual machine offers a cheaper variant
