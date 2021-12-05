@@ -1052,11 +1052,11 @@ Section SIMULATION_DIAGRAM.
 (** The generic proof is parameterized over the small-step semantics for the
   source and target languages, and over an invariant between their states. *)
 
-Variable state1: Type.	     (**r the type of configurations for the source language *)
-Variable step1: state1 -> state1 -> Prop.   (**r the small-step semantics for the source language *)
+Variable state1: Type.  (**r the type of configurations for the source language *)
+Variable step1: state1 -> state1 -> Prop.  (**r the small-step semantics for the source language *)
 
-Variable state2: Type.	     (**r the type of configurations for the target language *)
-Variable step2: state2 -> state2 -> Prop.   (**r the small-step semantics for the target language *)
+Variable state2: Type.  (**r the type of configurations for the target language *)
+Variable step2: state2 -> state2 -> Prop.  (**r the small-step semantics for the target language *)
 
 Variable match_states: state1 -> state2 -> Prop.  (**r the invariant *)
 
