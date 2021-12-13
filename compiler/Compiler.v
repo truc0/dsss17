@@ -799,6 +799,20 @@ the [KS_Seq] and [KS_SkipSeq] rules, just change the focus on a sub-command,
 but the machine need not execute any instruction to reflect this change of focus.
 *)
 
+Lemma code_at_imply_codeseq_at :
+  forall C pc i, code_at C pc = Some i -> codeseq_at C pc (i :: nil).
+Proof.
+  induction C; intros.
+  - inversion H.
+  - destruct pc eqn:Epc; inversion H; subst.
+    + change (i :: C) with (nil ++ (i :: nil) ++ C).
+      constructor. auto.
+    + apply IHC in H1. inversion H1.
+      change (a :: C1 ++ (i :: nil) ++ C3) with ((a :: C1) ++ (i :: nil) ++ C3).
+      constructor.
+      simpl. auto.
+Qed.
+
 Lemma simulation_step_first_attempt:
   forall C impstate1 impstate2 machstate1,
   kstep impstate1 impstate2 ->
@@ -807,7 +821,116 @@ Lemma simulation_step_first_attempt:
       star (transition C) machstate1 machstate2
    /\ match_config C impstate2 machstate2.
 Proof.
+  induction 1; intros Hmatch; inversion Hmatch; subst.
+  - (* i ::= a *)
+    exists (pc + length (compile_com (i ::= a)), nil, t_update st i (aeval st a)).
+    split.
+    + apply compile_com_correct_terminating.
+      constructor; reflexivity.
+      assumption.
+    + constructor; simpl.
+      apply codeseq_at_app_right. simpl in *. rewrite app_nil_r. assumption.
+      rewrite plus_0_r. assumption.
+  - (* c1 ;; c2 *)
+    exists (pc, nil, st).
+    split.
+    + constructor.
+    + constructor; simpl in *.
+      eauto with codeseq.
+      rewrite app_length in H4. rewrite plus_assoc in H4.
+      eapply ccont_seq.
+      * eauto with codeseq.
+      * reflexivity.
+      * assumption.
+  - (* IF b THEN c1 ELSE c2 FI, beval st b = true *)
+    set (ofs := length (compile_com c1) + 1) in *.
+    exists (pc + length (compile_bexp b false ofs), nil, st). 
+    split; simpl in *.
+    + assert (Hlength : pc + length (compile_bexp b false ofs)
+       = pc + length (compile_bexp b false ofs) + if eqb (beval st b) false then ofs else 0).
+       { rewrite H. auto. }
+      rewrite Hlength.
+      apply compile_bexp_correct. unfold ofs. eauto with codeseq.
+    + constructor; fold ofs in H4; fold ofs in H5; normalize.
+      * eauto with codeseq.
+      * eapply ccont_branch with (ofs := length (compile_com c2)).
+        -- eauto with codeseq.
+        -- reflexivity.
+        -- replace (pc + length (compile_bexp b false ofs) + length (compile_com c1) +
+        S (length (compile_com c2)))
+            with (pc + length (compile_bexp b false ofs) + length (compile_com c1) + 1 +
+   length (compile_com c2)) in H5 by omega.
+           assumption.
+  - (* IF b THEN c1 ELSE c2 FI, beval st b = false *)
+    set (ofs := length (compile_com c1) + 1) in *.
+    exists (pc + length (compile_bexp b false ofs) + ofs, nil, st). 
+    split; simpl in *.
+    + assert (Hlength : pc + length (compile_bexp b false ofs) + ofs
+       = pc + length (compile_bexp b false ofs) + if eqb (beval st b) false then ofs else 0).
+       { rewrite H. auto. }
+      rewrite Hlength.
+      apply compile_bexp_correct. unfold ofs. eauto with codeseq.
+    + constructor; fold ofs in H4; fold ofs in H5; normalize.
+      * unfold ofs. rewrite plus_assoc.
+        eauto with codeseq.
+      * unfold ofs. rewrite plus_assoc.
+        replace (pc + length (compile_bexp b false (length (compile_com c1) + 1)) +
+   length (compile_com c1) + 1 + length (compile_com c2))
+          with (pc + length (compile_bexp b false (length (compile_com c1) + 1)) +
+   length (compile_com c1) +S(length (compile_com c2))) by omega.
+        assumption.
+  - (* WHILE b DO c END, beval st b = true *)
+    set (ofs := length (compile_com c) + 1) in *.
+    exists (pc + length (compile_bexp b false ofs), nil, st); split.
+    + assert (Hlength : pc + length (compile_bexp b false ofs)
+       = pc + length (compile_bexp b false ofs) + if eqb (beval st b) false then ofs else 0).
+       { rewrite H. auto. }
+      rewrite Hlength.
+      apply compile_bexp_correct.
+      simpl in H4. eauto with codeseq.
+    + constructor.
+      * normalize. eauto with codeseq.
+      * eapply ccont_while; normalize.
+        -- eauto with codeseq.
+        -- reflexivity.
+        -- fold ofs. 
+           replace (pc + length (compile_bexp b false ofs) + length (compile_com c) + 1 -
+   (length (compile_bexp b false ofs) + length (compile_com c) + 1))
+            with pc by omega.
+           eauto with codeseq.
+        -- reflexivity.
+        -- fold ofs.
+           replace (pc + length (compile_bexp b false ofs) + length (compile_com c) + 1 -
+   (length (compile_bexp b false ofs) + length (compile_com c) + 1))
+            with pc by omega.
+           assumption.
+  - (* WHILE b DO c END, beval st b = false *)
+    set (ofs := length (compile_com c) + 1) in *.
+    exists (pc + length (compile_bexp b false ofs) + ofs, nil, st); split.
+    + assert (Hlength : pc + length (compile_bexp b false ofs) + ofs
+       = pc + length (compile_bexp b false ofs) + if eqb (beval st b) false then ofs else 0).
+       { rewrite H. auto. }
+      rewrite Hlength.
+      apply compile_bexp_correct.
+      simpl in H4. eauto with codeseq.
+    + constructor.
+      * normalize. unfold ofs. rewrite plus_assoc.
+        eauto with codeseq.
+      * normalize. 
+        repeat rewrite app_length in H5. normalize.
+        unfold ofs. normalize. assumption.
+  - (* SKIP *) 
+    normalize.
+    inversion H4; subst.
+    + exists (pc, nil, st). split; constructor; auto.
+    + exists (pc + 1 + ofs, nil, st). split.
+      * apply star_one. eapply trans_branch_forward.
+        apply H. reflexivity.
+      * constructor.
+Admitted.
+(*
 Abort.
+  *)
 
 (** This simulation lemma is true and can be proved, but it is too weak to
   imply the preservation of diverging behaviors: we have an issue with
@@ -1236,9 +1359,48 @@ Lemma compile_aexp_gen_correct:
        (pc + length (compile_aexp_gen ord a), aeval st a :: stk, st).
 Proof.
   induction a; simpl; intros.
-  (* FILL IN HERE *)
-Admitted.
+  - (* ANum *) 
+    apply star_one. apply trans_const. eauto with codeseq. 
 
+  - (* AId *)
+    apply star_one. apply trans_var. eauto with codeseq. 
+
+  - (* APlus *)
+    destruct (ord a1 a2) eqn:Eord.
+    + eapply star_trans.
+      apply IHa1. eauto with codeseq. 
+      eapply star_trans.
+      apply IHa2. eauto with codeseq. 
+      apply star_one. normalize. apply trans_add. eauto with codeseq. 
+    + eapply star_trans.
+      apply IHa2. eauto with codeseq. 
+      eapply star_trans.
+      apply IHa1. eauto with codeseq. 
+      apply star_one. normalize. 
+      replace (aeval st a1 + aeval st a2) with (aeval st a2 + aeval st a1) by omega.
+      apply trans_add. eauto with codeseq. 
+
+  - (* AMinus *)
+    eapply star_trans.
+    apply IHa1. eauto with codeseq. 
+    eapply star_trans.  apply IHa2. eauto with codeseq. 
+    apply star_one. normalize. apply trans_sub. eauto with codeseq. 
+
+  - (* AMult *)
+    destruct (ord a1 a2) eqn:Eord.
+    + eapply star_trans.
+      apply IHa1. eauto with codeseq. 
+      eapply star_trans.
+      apply IHa2. eauto with codeseq. 
+      apply star_one. normalize. apply trans_mul. eauto with codeseq. 
+    + eapply star_trans.
+      apply IHa2. eauto with codeseq. 
+      eapply star_trans.
+      apply IHa1. eauto with codeseq. 
+      apply star_one. normalize. 
+      rewrite mult_comm.
+      apply trans_mul. eauto with codeseq. 
+Qed.
 (** Now, let us try to compute the minimum number of stack entries
   needed to evaluate an expression, regardless of the strategy used. *)
 
@@ -1294,11 +1456,63 @@ Fixpoint stack_usage (ord: aexp -> aexp -> eval_order) (a: aexp) : nat :=
       end
   end.
 
+Lemma lt_imply_le:
+  forall x y, x < y -> x <= y.
+Proof.
+  intros.
+  inversion H.
+  - constructor. constructor.
+  - constructor. apply le_trans with (m := S x).
+    + repeat constructor.
+    + assumption.
+Qed.
+
+Lemma smaller_max_smaller:
+  forall a b x y,
+    a <= x -> b <= y -> max a b <= max x y.
+Proof.
+  intros.
+  destruct (le_or_lt a b), (le_or_lt x y).
+  - repeat rewrite max_r by assumption. assumption.
+  - rewrite max_r by assumption.
+    apply lt_imply_le in H2.
+    rewrite max_l by assumption.
+    apply le_trans with y; assumption.
+  - apply lt_imply_le in H1.
+    rewrite max_l by assumption. rewrite max_r by assumption.
+    apply le_trans with x; assumption.
+  - apply lt_imply_le in H1. apply lt_imply_le in H2.
+    rewrite max_l by assumption. rewrite max_l by assumption.
+    assumption.
+Qed.
+
 Lemma stack_needs_is_optimal:
   forall ord a, stack_needs a <= stack_usage ord a.
 Proof.
-  (* FILL IN HERE *)
-Admitted.
+  induction a; simpl; try omega; destruct (ord a1 a2); zify; omega.
+  (*
+  - (* ANum *) 
+    destruct (ord a1 a2) eqn:Eord.
+    + apply le_trans with (m := max (stack_needs a1) (stack_needs a2 + 1)).
+      * apply le_min_l.
+      * apply smaller_max_smaller; omega.
+    + apply le_trans with (m := max (stack_needs a2) (stack_needs a1 + 1)).
+      * apply le_min_r.
+      * apply smaller_max_smaller; omega.
+  - (* AId *)
+    apply le_trans with (m := max (stack_needs a1) (stack_needs a2 + 1)).
+    * constructor.
+    * apply smaller_max_smaller; omega.
+  - (* APlus a1 a2 *)
+    destruct (ord a1 a2) eqn:Eord.
+    + apply le_trans with (m := max (stack_needs a1) (stack_needs a2 + 1)).
+      * apply le_min_l.
+      * apply smaller_max_smaller; omega.
+    + apply le_trans with (m := max (stack_needs a2) (stack_needs a1 + 1)).
+      * apply le_min_r.
+      * apply smaller_max_smaller; omega.
+   *)
+Qed.
 
 (** Useful tip: the tactic [zify; omega] works very well to prove
     arithmetic properties involving min and max operators. *)
@@ -1327,11 +1541,75 @@ Definition compile_aexp_optimal (a: aexp) : code :=
 (** We can show the optimality of the strategy by observing that 
   its stack usage is the minimum predicted by [stack_needs]. *)
 
+Lemma n_le_Sn: forall n,
+  n <= S n.
+Proof.
+  constructor. constructor.
+Qed.
+
+Lemma Sn_le_Sm__n_le_m : forall n m,
+  S n <= S m -> n <= m.
+Proof.
+  intros n m HSmn.
+  remember (S m) as Sm.
+  generalize dependent m.
+  induction HSmn as [| m' HSm' IHm'].
+  - intros m HSnm. injection HSnm as Hnm. rewrite Hnm. apply le_n.
+  - intros m HSm'm. injection HSm'm as Em'm. 
+    symmetry in Em'm. rewrite Em'm.
+    apply (le_trans n (S n) m' (n_le_Sn n) HSm').
+Qed.
+
+Lemma le_gt_contra: forall m n,
+  ~ (m <= n /\ m > n).
+Proof.
+  intros m.
+  induction m as [| m' IHm'].
+  - intros n [H0 H1]. inversion H1.
+  - intros n [H0 H1]. destruct n as [| n'].
+    + inversion H0.
+    + apply (IHm' n'). apply Sn_le_Sm__n_le_m in H0. 
+      apply Sn_le_Sm__n_le_m in H1. split.
+      * apply H0.
+      * apply H1.
+Qed.
+
 Lemma stack_usage_optimal_ord:
   forall a, stack_usage optimal_ord a = stack_needs a.
 Proof.
-  (* FILL IN HERE *)
-Admitted.  
+  induction a; try auto; simpl; unfold optimal_ord;
+  destruct (le_or_lt (stack_needs a2) (stack_needs a1)).
+  - assert (Hle: stack_needs a2 <=? stack_needs a1 = true). 
+    { apply leb_correct in H. assumption. }
+    rewrite Hle.
+    fold optimal_ord; rewrite IHa1; rewrite IHa2.
+    zify; omega.
+  - assert (Hle: stack_needs a2 <=? stack_needs a1 = false). 
+    { 
+      destruct (stack_needs a2 <=? stack_needs a1) eqn:Es; try auto.
+      apply leb_complete in Es.
+      exfalso. eapply le_gt_contra; split; eassumption.
+    }
+    rewrite Hle.
+    fold optimal_ord; rewrite IHa1; rewrite IHa2.
+    zify; omega.
+  - fold optimal_ord; rewrite IHa1; rewrite IHa2. reflexivity.
+  - fold optimal_ord; rewrite IHa1; rewrite IHa2. reflexivity.
+  - assert (Hle: stack_needs a2 <=? stack_needs a1 = true). 
+    { apply leb_correct in H. assumption. }
+    rewrite Hle.
+    fold optimal_ord; rewrite IHa1; rewrite IHa2.
+    zify; omega.
+  - assert (Hle: stack_needs a2 <=? stack_needs a1 = false). 
+    { 
+      destruct (stack_needs a2 <=? stack_needs a1) eqn:Es; try auto.
+      apply leb_complete in Es.
+      exfalso. eapply le_gt_contra; split; eassumption.
+    }
+    rewrite Hle.
+    fold optimal_ord; rewrite IHa1; rewrite IHa2.
+    zify; omega.
+Qed.  
 
 (** So far, we've reasoned informally on the stack usage of a particular
   evaluation strategy.  Now, let us formally connect this reasoning with the
@@ -1358,7 +1636,94 @@ Lemma compile_aexp_gen_safe:
        (pc + length (compile_aexp_gen ord a), aeval st a :: stk, st).
 Proof.
   induction a; simpl; intros.
-Admitted.
+  - (* ANum *)
+    apply star_one. constructor.
+    + apply trans_const. eauto with codeseq.
+    + simpl. replace (length stk + 1) with (S (length stk)) in H0 by omega; assumption.
+  - (* AId *)
+    apply star_one. constructor.
+    + apply trans_var. eauto with codeseq. 
+    + simpl. replace (length stk + 1) with (S (length stk)) in H0 by omega; assumption.
+  - (* APlus *)
+    destruct (ord a1 a2) eqn:Eord.
+    + eapply star_trans.
+      apply IHa1. eauto with codeseq.
+      apply le_trans with (length stk + max (stack_usage ord a1) (stack_usage ord a2 + 1)).
+      zify; omega. assumption.
+      (* -- *)
+      eapply star_trans.
+      apply IHa2. eauto with codeseq.
+      simpl. rewrite plus_n_Sm.
+      replace (S (stack_usage ord a2)) with (stack_usage ord a2 + 1) by omega.
+      apply le_trans with (length stk + max (stack_usage ord a1) (stack_usage ord a2 + 1));
+      zify; omega. 
+      (* -- *)
+      apply star_one. constructor; normalize.
+      * apply trans_add. eauto with codeseq.
+      * zify; omega.
+    + eapply star_trans.
+      apply IHa2. eauto with codeseq.
+      zify; omega.
+      (* -- *)
+      eapply star_trans.
+      apply IHa1. eauto with codeseq.
+      simpl. rewrite plus_n_Sm.
+      replace (S (stack_usage ord a1)) with (stack_usage ord a1 + 1) by omega.
+      apply le_trans with (length stk + max (stack_usage ord a2) (stack_usage ord a1 + 1));
+      zify; omega. 
+      (* -- *)
+      apply star_one. constructor; normalize.
+      * replace (aeval st a1 + aeval st a2) with (aeval st a2 + aeval st a1) by omega.
+        apply trans_add. eauto with codeseq.
+      * zify; omega.
+  - (* AMinus *)
+    eapply star_trans.
+    apply IHa1. eauto with codeseq.
+    zify; omega.
+    (* -- *)
+    eapply star_trans. apply IHa2. eauto with codeseq.
+    (* -- *)
+    simpl. rewrite plus_n_Sm.
+    replace (S (stack_usage ord a2)) with (stack_usage ord a2 + 1) by omega.
+    apply le_trans with (length stk + max (stack_usage ord a1) (stack_usage ord a2 + 1));
+    zify; omega.
+    (* -- *)
+    apply star_one. constructor; normalize. 
+    * apply trans_sub. eauto with codeseq.
+    * zify; omega.
+  - (* AMul *)
+    destruct (ord a1 a2) eqn:Eord.
+    + eapply star_trans.
+      apply IHa1. eauto with codeseq.
+      apply le_trans with (length stk + max (stack_usage ord a1) (stack_usage ord a2 + 1)).
+      zify; omega. assumption.
+      (* -- *)
+      eapply star_trans.
+      apply IHa2. eauto with codeseq.
+      simpl. rewrite plus_n_Sm.
+      replace (S (stack_usage ord a2)) with (stack_usage ord a2 + 1) by omega.
+      apply le_trans with (length stk + max (stack_usage ord a1) (stack_usage ord a2 + 1));
+      zify; omega. 
+      (* -- *)
+      apply star_one. constructor; normalize.
+      * apply trans_mul. eauto with codeseq.
+      * zify; omega.
+    + eapply star_trans.
+      apply IHa2. eauto with codeseq.
+      zify; omega.
+      (* -- *)
+      eapply star_trans.
+      apply IHa1. eauto with codeseq.
+      simpl. rewrite plus_n_Sm.
+      replace (S (stack_usage ord a1)) with (stack_usage ord a1 + 1) by omega.
+      apply le_trans with (length stk + max (stack_usage ord a2) (stack_usage ord a1 + 1));
+      zify; omega. 
+      (* -- *)
+      apply star_one. constructor; normalize.
+      * rewrite mult_comm.
+        apply trans_mul. eauto with codeseq.
+      * zify; omega.
+Qed.
 
 (** Moreover, the size [stack_usage ord a] is tight, in that there exists
   a point in the execution of the compiled code for [a] where the stack
@@ -1372,8 +1737,117 @@ Lemma stack_usage_reached:
   /\ length stk' >= length stk + stack_usage ord a.
 Proof.
   induction a; simpl; intros.
-  (* FILL IN HERE *)
-Admitted.
+  - (* ANum *)
+    exists (pc + 1), (n :: stk); split.
+    apply star_one. apply trans_const. eauto with codeseq.
+    simpl; omega.
+  - (* AId *)
+    exists (pc + 1), (st i :: stk); split.
+    apply star_one. apply trans_var. eauto with codeseq.
+    simpl; omega.
+  - (* APlus *)
+    destruct (ord a1 a2) eqn:Eord.
+    + assert (Hlen1: codeseq_at C pc (compile_aexp_gen ord a1)). { eauto with codeseq. }
+      assert (Hlen2: codeseq_at C (pc + length (compile_aexp_gen ord a1)) (compile_aexp_gen ord a2)). { eauto with codeseq. }
+      (* apply IHa1 with (pc := pc) (stk := stk) in Hlen1. *)
+      apply IHa2 with (stk := (aeval st a1 :: stk)) (pc := pc + length (compile_aexp_gen ord a1)) in Hlen2.
+      destruct (le_or_lt (stack_usage ord a1) (stack_usage ord a2 + 1)) eqn:Ele.
+      * destruct Hlen2 as [pc' [stk' [Hstar Hlen]]].
+        exists pc', stk'; split.
+        -- eapply star_trans.
+           apply compile_aexp_gen_correct.
+           apply Hlen1.
+           assumption.
+        -- replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a2 + 1) by (zify; omega).
+           simpl in *; zify; omega.
+      * unfold lt in l.
+        replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a1) by (zify; omega).
+        apply IHa1. assumption.
+    + assert (Hlen2: codeseq_at C (pc + length (compile_aexp_gen ord a2)) (compile_aexp_gen ord a1)). { eauto with codeseq. }
+      assert (Hlen1: codeseq_at C pc (compile_aexp_gen ord a2)). { eauto with codeseq. }
+      (* apply IHa1 with (pc := pc) (stk := stk) in Hlen1. *)
+      apply IHa1 with (stk := (aeval st a2 :: stk)) (pc := pc + length (compile_aexp_gen ord a2)) in Hlen2.
+      destruct (le_or_lt (stack_usage ord a1 + 1) (stack_usage ord a2)) eqn:Ele.
+      * replace (max (stack_usage ord a2) (stack_usage ord a1 + 1)) with (stack_usage ord a2) by (zify; omega).
+        apply IHa2. assumption.
+      * destruct Hlen2 as [pc' [stk' [Hstar Hlen]]].
+        exists pc', stk'; split.
+        -- eapply star_trans.
+           apply compile_aexp_gen_correct.
+           apply Hlen1.
+           assumption.
+        -- unfold lt.
+           replace (max (stack_usage ord a2) (stack_usage ord a1 + 1)) with (stack_usage ord a1 + 1) by (zify; omega).
+           simpl in *; zify; omega.
+  - (* AMinus *)
+    destruct (ord a1 a2) eqn:Eord.
+    + assert (Hlen1: codeseq_at C pc (compile_aexp_gen ord a1)). { eauto with codeseq. }
+      assert (Hlen2: codeseq_at C (pc + length (compile_aexp_gen ord a1)) (compile_aexp_gen ord a2)). { eauto with codeseq. }
+      (* apply IHa1 with (pc := pc) (stk := stk) in Hlen1. *)
+      apply IHa2 with (stk := (aeval st a1 :: stk)) (pc := pc + length (compile_aexp_gen ord a1)) in Hlen2.
+      destruct (le_or_lt (stack_usage ord a1) (stack_usage ord a2 + 1)) eqn:Ele.
+      * destruct Hlen2 as [pc' [stk' [Hstar Hlen]]].
+        exists pc', stk'; split.
+        -- eapply star_trans.
+           apply compile_aexp_gen_correct.
+           apply Hlen1.
+           assumption.
+        -- replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a2 + 1) by (zify; omega).
+           simpl in *; zify; omega.
+      * unfold lt in l.
+        replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a1) by (zify; omega).
+        apply IHa1. assumption.
+    + assert (Hlen1: codeseq_at C pc (compile_aexp_gen ord a1)). { eauto with codeseq. }
+      assert (Hlen2: codeseq_at C (pc + length (compile_aexp_gen ord a1)) (compile_aexp_gen ord a2)). { eauto with codeseq. }
+      (* apply IHa1 with (pc := pc) (stk := stk) in Hlen1. *)
+      apply IHa2 with (stk := (aeval st a1 :: stk)) (pc := pc + length (compile_aexp_gen ord a1)) in Hlen2.
+      destruct (le_or_lt (stack_usage ord a1) (stack_usage ord a2 + 1)) eqn:Ele.
+      * destruct Hlen2 as [pc' [stk' [Hstar Hlen]]].
+        exists pc', stk'; split.
+        -- eapply star_trans.
+           apply compile_aexp_gen_correct.
+           apply Hlen1.
+           assumption.
+        -- replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a2 + 1) by (zify; omega).
+           simpl in *; zify; omega.
+      * unfold lt in l.
+        replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a1) by (zify; omega).
+        apply IHa1. assumption.
+  - (* AMul *)
+    destruct (ord a1 a2) eqn:Eord.
+    + assert (Hlen1: codeseq_at C pc (compile_aexp_gen ord a1)). { eauto with codeseq. }
+      assert (Hlen2: codeseq_at C (pc + length (compile_aexp_gen ord a1)) (compile_aexp_gen ord a2)). { eauto with codeseq. }
+      (* apply IHa1 with (pc := pc) (stk := stk) in Hlen1. *)
+      apply IHa2 with (stk := (aeval st a1 :: stk)) (pc := pc + length (compile_aexp_gen ord a1)) in Hlen2.
+      destruct (le_or_lt (stack_usage ord a1) (stack_usage ord a2 + 1)) eqn:Ele.
+      * destruct Hlen2 as [pc' [stk' [Hstar Hlen]]].
+        exists pc', stk'; split.
+        -- eapply star_trans.
+           apply compile_aexp_gen_correct.
+           apply Hlen1.
+           assumption.
+        -- replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a2 + 1) by (zify; omega).
+           simpl in *; zify; omega.
+      * unfold lt in l.
+        replace (max (stack_usage ord a1) (stack_usage ord a2 + 1)) with (stack_usage ord a1) by (zify; omega).
+        apply IHa1. assumption.
+    + assert (Hlen2: codeseq_at C (pc + length (compile_aexp_gen ord a2)) (compile_aexp_gen ord a1)). { eauto with codeseq. }
+      assert (Hlen1: codeseq_at C pc (compile_aexp_gen ord a2)). { eauto with codeseq. }
+      (* apply IHa1 with (pc := pc) (stk := stk) in Hlen1. *)
+      apply IHa1 with (stk := (aeval st a2 :: stk)) (pc := pc + length (compile_aexp_gen ord a2)) in Hlen2.
+      destruct (le_or_lt (stack_usage ord a1 + 1) (stack_usage ord a2)) eqn:Ele.
+      * replace (max (stack_usage ord a2) (stack_usage ord a1 + 1)) with (stack_usage ord a2) by (zify; omega).
+        apply IHa2. assumption.
+      * destruct Hlen2 as [pc' [stk' [Hstar Hlen]]].
+        exists pc', stk'; split.
+        -- eapply star_trans.
+           apply compile_aexp_gen_correct.
+           apply Hlen1.
+           assumption.
+        -- unfold lt.
+           replace (max (stack_usage ord a2) (stack_usage ord a1 + 1)) with (stack_usage ord a1 + 1) by (zify; omega).
+           simpl in *; zify; omega.
+Qed.
 
 (** **** Full project (5 stars) *)
 
